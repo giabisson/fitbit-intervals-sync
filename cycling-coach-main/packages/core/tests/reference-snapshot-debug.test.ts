@@ -1,0 +1,300 @@
+import { describe, expect, it } from "vitest";
+import {
+  formatSnapshotRaw,
+  snapshotChunkToTelegramHtml,
+} from "../src/reference/sync/snapshot-debug.js";
+import { markdownToTelegramHtml, chunkHtml } from "../src/channels/telegram.js";
+import type { LatestJson } from "../src/reference/schemas/latest.js";
+import { GARMIN_DATA_ATTRIBUTION } from "../src/agent/garmin-attribution.js";
+
+const ATTRIBUTED_FENCE_PREFIX = `${GARMIN_DATA_ATTRIBUTION}\n\n\`\`\`\n`;
+const FENCE_PREFIX = "```\n";
+const FENCE_SUFFIX = "\n```";
+
+function snapshotChunkBody(chunk: string): string {
+  const prefix = chunk.startsWith(ATTRIBUTED_FENCE_PREFIX) ? ATTRIBUTED_FENCE_PREFIX : FENCE_PREFIX;
+  return chunk.slice(prefix.length, -FENCE_SUFFIX.length);
+}
+
+const tinyLatest: LatestJson = {
+  metadata: {
+    schema_version: "1",
+    last_updated: "2026-05-09T14:00:00Z",
+    freshness: "fresh",
+  },
+  athlete_profile: { id: "test", name: "Athlete" },
+  current_status: { fitness: 70 },
+  derived_metrics: {},
+  recent_activities: [{ id: 1 }],
+  planned_workouts: [],
+  wellness_data: { sleep_hours: 7.5 },
+};
+
+describe("formatSnapshotRaw", () => {
+  it("returns 'Reference hasn't synced yet' guidance when latest is null", () => {
+    const out = formatSnapshotRaw(null);
+    expect(out.kind).toBe("chunks");
+    if (out.kind === "chunks") {
+      expect(out.chunks).toEqual(["Reference hasn't synced yet — try `/sync` first."]);
+    }
+  });
+
+  it("returns HTML-path-renderable chunks for a small full dump (each chunk ≤4096 chars)", () => {
+    const out = formatSnapshotRaw(tinyLatest);
+    expect(out.kind).toBe("chunks");
+    if (out.kind === "chunks") {
+      expect(out.chunks.length).toBeGreaterThanOrEqual(1);
+      for (const chunk of out.chunks) {
+        expect(chunk.length).toBeLessThanOrEqual(4096);
+        expect(chunk.startsWith(FENCE_PREFIX)).toBe(true);
+        expect(chunk.endsWith("\n```")).toBe(true);
+        expect(chunk).not.toContain("```json");
+      }
+      // The serialized data should appear somewhere in the chunks.
+      expect(out.chunks.join("")).toContain('"id": "test"');
+      expect(out.chunks.join("")).toContain('"sleep_hours": 7.5');
+    }
+  });
+
+  it("renders every chunk to a single <pre> within Telegram's limit even when the body is escape-dense", () => {
+    // intervals.icu activity names/descriptions are Strava-mirrored and can be
+    // dense with `& < >`, which expand under HTML escaping (`&`→`&amp;` is +4).
+    // If the chunk budget ignored that expansion, a rendered <pre> would overflow
+    // 4096 and the converter's chunker would re-split it — breaking the 1:1
+    // raw→sent mapping the snapshot retry relies on.
+    const escapeDense: LatestJson = {
+      ...tinyLatest,
+      recent_activities: [{ id: 1, name: "<&>".repeat(1000) }],
+    };
+    const out = formatSnapshotRaw(escapeDense);
+    expect(out.kind).toBe("chunks");
+    if (out.kind === "chunks") {
+      expect(out.chunks.length).toBeGreaterThan(1);
+      for (const chunk of out.chunks) {
+        expect(chunk.startsWith(FENCE_PREFIX)).toBe(true);
+        const rendered = markdownToTelegramHtml(chunk);
+        expect(rendered.length).toBeLessThanOrEqual(4096);
+        expect(chunkHtml(rendered)).toHaveLength(1);
+      }
+    }
+  });
+
+  it("keeps a budget-filling plain-ASCII chunk inside Telegram's limit (1:1 raw→sent)", () => {
+    // The COMMON case: JSON snapshots are predominantly ASCII, where each char
+    // escapes to length 1, so a full-size chunk fills the rendered budget exactly.
+    // FENCE_RE captures `slice + "\n"` (the leading newline of the closing fence)
+    // as the <pre> body, so the restored block carries one char the `<pre></pre>`
+    // overhead alone never reserves. Sizing the section so a slice lands on the
+    // budget boundary exercises that path: without the trailing -1 in
+    // RENDERED_BUDGET the rendered <pre> would be 4097, defeating the 1:1
+    // raw→sent invariant this chunker exists to guarantee.
+    const asciiHeavy: LatestJson = {
+      ...tinyLatest,
+      derived_metrics: { note: "z".repeat(9000) },
+    };
+    const out = formatSnapshotRaw(asciiHeavy);
+    expect(out.kind).toBe("chunks");
+    if (out.kind === "chunks") {
+      expect(out.chunks.length).toBeGreaterThan(1);
+      // At least one chunk must actually fill the budget — otherwise the test
+      // never exercises the boundary it's meant to guard.
+      const maxRendered = Math.max(
+        ...out.chunks.map((chunk) => markdownToTelegramHtml(chunk).length),
+      );
+      expect(maxRendered).toBe(4096);
+      for (const chunk of out.chunks) {
+        expect(chunk.startsWith(FENCE_PREFIX)).toBe(true);
+        const rendered = markdownToTelegramHtml(chunk);
+        expect(rendered.length).toBeLessThanOrEqual(4096);
+        expect(chunkHtml(rendered)).toHaveLength(1);
+      }
+    }
+  });
+
+  it("returns just the requested section when a valid name is passed", () => {
+    const out = formatSnapshotRaw(tinyLatest, "wellness_data");
+    expect(out.kind).toBe("chunks");
+    if (out.kind === "chunks") {
+      expect(out.chunks.join("")).toContain('"sleep_hours": 7.5');
+      expect(out.chunks.join("")).not.toContain('"athlete_profile"');
+      expect(out.chunks.every((chunk) => chunk.startsWith(FENCE_PREFIX))).toBe(true);
+    }
+  });
+
+  it("accepts section names case-insensitively", () => {
+    const out = formatSnapshotRaw(tinyLatest, "Wellness_Data");
+    expect(out.kind).toBe("chunks");
+    if (out.kind === "chunks") {
+      expect(out.chunks.join("")).toContain('"sleep_hours": 7.5');
+      expect(out.chunks.every((chunk) => chunk.startsWith(FENCE_PREFIX))).toBe(true);
+    }
+  });
+
+  it("returns a help-style message listing valid sections when an unknown section is requested", () => {
+    const out = formatSnapshotRaw(tinyLatest, "garbage_section");
+    expect(out.kind).toBe("chunks");
+    if (out.kind === "chunks") {
+      expect(out.chunks).toEqual([
+        "Unknown section: `garbage_section`.\n\nValid sections: athlete_profile, current_status, derived_metrics, recent_activities, planned_workouts, wellness_data, metadata.",
+      ]);
+    }
+  });
+
+  it("returns a document buffer when total bytes exceed the document threshold", () => {
+    // Build a recent_activities array large enough to exceed 64 KiB.
+    const fatActivities = Array.from({ length: 200 }, (_, i) => ({
+      id: i,
+      name: `Activity ${i}`,
+      description: "x".repeat(500),
+    }));
+    const fat: LatestJson = {
+      ...tinyLatest,
+      recent_activities: fatActivities,
+    };
+
+    const out = formatSnapshotRaw(fat);
+    expect(out.kind).toBe("document");
+    if (out.kind === "document") {
+      expect(out.buffer.byteLength).toBeGreaterThan(65_536);
+      expect(out.filename).toMatch(/^snapshot-.*\.json$/);
+      const parsed = JSON.parse(out.buffer.toString("utf8"));
+      expect(parsed.recent_activities).toHaveLength(200);
+      expect(out.buffer.toString("utf8")).not.toContain(GARMIN_DATA_ATTRIBUTION);
+      expect(out.chunks.every((chunk) => chunk.startsWith(FENCE_PREFIX))).toBe(true);
+    }
+  });
+
+  it("returns a document buffer when chunk count would exceed the chunk threshold", () => {
+    // Build a body whose JSON is between byte and chunk thresholds. Trick: many
+    // moderately-sized records that JSON-stringify to >10 chunks but <64 KiB.
+    // 10 chunks × ~4080 chars body ≈ 40 KB — well under the byte limit.
+    const padded: LatestJson = {
+      ...tinyLatest,
+      derived_metrics: { padding: "y".repeat(45_000) },
+    };
+
+    const out = formatSnapshotRaw(padded);
+    expect(out.kind).toBe("document");
+    if (out.kind === "document") {
+      expect(out.filename).toMatch(/^snapshot-.*\.json$/);
+    }
+  });
+
+  it("forces document mode when athlete data contains a Markdown fence-breaker (```)", () => {
+    // An athlete's activity description containing a code block would close
+    // the outer ```json fence early under Markdown parse mode. Document mode
+    // side-steps the escaping entirely.
+    const fenceBreaking: LatestJson = {
+      ...tinyLatest,
+      recent_activities: [
+        {
+          id: 1,
+          name: "Easy ride",
+          description: "Notes from coach:\n```\npush 220W on the climb\n```\nfelt good",
+        },
+      ],
+    };
+
+    const out = formatSnapshotRaw(fenceBreaking);
+    expect(out.kind).toBe("document");
+    if (out.kind === "document") {
+      expect(out.filename).toMatch(/^snapshot-.*\.json$/);
+      const serialized = out.buffer.toString("utf8");
+      expect(serialized).toContain("```");
+      const fallbackBodies = out.chunks.map(snapshotChunkBody);
+      expect(fallbackBodies.join("")).toBe(serialized);
+      for (const chunk of out.chunks) {
+        const rendered = snapshotChunkToTelegramHtml(chunk);
+        expect(rendered.match(/<pre>/g)).toHaveLength(1);
+        expect(rendered.match(/<\/pre>/g)).toHaveLength(1);
+        expect(rendered.length).toBeLessThanOrEqual(4096);
+      }
+    }
+  });
+
+  it("keeps dense Markdown fence data to a bounded number of HTML-native fallback chunks", () => {
+    const fenceDense: LatestJson = {
+      ...tinyLatest,
+      recent_activities: [{ id: 1, description: "`".repeat(30_000) }],
+    };
+
+    const out = formatSnapshotRaw(fenceDense);
+    expect(out.kind).toBe("document");
+    if (out.kind === "document") {
+      expect(out.chunks.length).toBeLessThanOrEqual(10);
+      expect(out.chunks.map(snapshotChunkBody).join("")).toBe(out.buffer.toString("utf8"));
+      for (const chunk of out.chunks) {
+        const rendered = snapshotChunkToTelegramHtml(chunk);
+        expect(rendered.length).toBeLessThanOrEqual(4096);
+        expect(rendered.match(/<pre>/g)).toHaveLength(1);
+        expect(rendered.match(/<\/pre>/g)).toHaveLength(1);
+      }
+    }
+  });
+
+  it("forces document mode when a single section contains a fence-breaker", () => {
+    // Sectioned snapshot must apply the same protection.
+    const fenceBreaking: LatestJson = {
+      ...tinyLatest,
+      athlete_profile: { id: "test", bio: "weekend warrior ```cyclist```" },
+    };
+
+    const out = formatSnapshotRaw(fenceBreaking, "athlete_profile");
+    expect(out.kind).toBe("document");
+  });
+
+  it("attributes only sections whose rendered data confirms Garmin", () => {
+    const garminLatest: LatestJson = {
+      ...tinyLatest,
+      recent_activities: [{ id: 1, source: "GARMIN_CONNECT" }],
+      source_provenance: {
+        athlete_profile: { garmin: false, nonGarmin: false, unknown: true },
+        current_status: { garmin: false, nonGarmin: false, unknown: false },
+        derived_metrics: { garmin: true, nonGarmin: false, unknown: true },
+        recent_activities: { garmin: true, nonGarmin: false, unknown: false },
+        planned_workouts: { garmin: false, nonGarmin: false, unknown: false },
+        wellness_data: { garmin: false, nonGarmin: false, unknown: true },
+      },
+    };
+
+    const activities = formatSnapshotRaw(garminLatest, "recent_activities");
+    const wellness = formatSnapshotRaw(garminLatest, "wellness_data");
+    expect(activities.chunks.every((chunk) => chunk.startsWith(ATTRIBUTED_FENCE_PREFIX))).toBe(
+      true,
+    );
+    expect(wellness.chunks.every((chunk) => chunk.startsWith(FENCE_PREFIX))).toBe(true);
+  });
+
+  it("classifies visible activities instead of trusting inconsistent side metadata", () => {
+    const persistedGarmin = {
+      athlete_profile: { garmin: false, nonGarmin: false, unknown: false },
+      current_status: { garmin: false, nonGarmin: false, unknown: false },
+      derived_metrics: { garmin: false, nonGarmin: false, unknown: false },
+      recent_activities: { garmin: true, nonGarmin: false, unknown: false },
+      planned_workouts: { garmin: false, nonGarmin: false, unknown: false },
+      wellness_data: { garmin: false, nonGarmin: false, unknown: false },
+    };
+    const polar = formatSnapshotRaw(
+      {
+        ...tinyLatest,
+        recent_activities: [{ id: 1, source: "POLAR" }],
+        source_provenance: persistedGarmin,
+      },
+      "recent_activities",
+    );
+    const garmin = formatSnapshotRaw(
+      {
+        ...tinyLatest,
+        recent_activities: [{ id: 1, source: "GARMIN_CONNECT" }],
+        source_provenance: {
+          ...persistedGarmin,
+          recent_activities: { garmin: false, nonGarmin: false, unknown: true },
+        },
+      },
+      "recent_activities",
+    );
+
+    expect(polar.chunks.every((chunk) => chunk.startsWith(FENCE_PREFIX))).toBe(true);
+    expect(garmin.chunks.every((chunk) => chunk.startsWith(ATTRIBUTED_FENCE_PREFIX))).toBe(true);
+  });
+});

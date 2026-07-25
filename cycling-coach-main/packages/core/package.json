@@ -1,0 +1,43 @@
+{
+  "name": "@enduragent/core",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Sport-agnostic infrastructure for AI coaching agents (agent loop, memory, secrets, channels, LLM, intervals.icu). Publishes the Sport contract.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "license": "MIT",
+  "scripts": {
+    "build": "tsup",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sdk/alibaba": "^1.0.29",
+    "@ai-sdk/anthropic": "^3.0.69",
+    "@ai-sdk/deepseek": "^2.0.25",
+    "@ai-sdk/google": "^3.0.63",
+    "@ai-sdk/openai": "^3.0.52",
+    "@ai-sdk/openai-compatible": "^2.0.51",
+    "@ai-sdk/provider": "^3.0.9",
+    "@ai-sdk/provider-utils": "^4.0.24",
+    "@clack/prompts": "^1.2.0",
+    "@grammyjs/auto-retry": "^2.0.2",
+    "@openrouter/ai-sdk-provider": "^2.9.1",
+    "ai": "^6.0.158",
+    "grammy": "^1.42.0",
+    "intervals-icu-api": "^0.1.2",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "fast-check": "^4.7.0",
+    "tsup": "^8.4.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
+  }
+}

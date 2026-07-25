@@ -1,0 +1,52 @@
+{
+  "name": "cycling-coach",
+  "version": "2026.7.2",
+  "description": "AI cycling coaching agent — BYOK + intervals.icu + Telegram",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "cycling-coach": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yerzhansa/cycling-coach.git",
+    "directory": "packages/cycling-coach"
+  },
+  "homepage": "https://github.com/yerzhansa/cycling-coach#readme",
+  "bugs": {
+    "url": "https://github.com/yerzhansa/cycling-coach/issues"
+  },
+  "scripts": {
+    "build": "tsup",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.69",
+    "@ai-sdk/google": "^3.0.63",
+    "@ai-sdk/openai": "^3.0.52",
+    "@ai-sdk/provider": "^3.0.9",
+    "@ai-sdk/provider-utils": "^4.0.24",
+    "@clack/prompts": "^1.2.0",
+    "ai": "^6.0.158",
+    "grammy": "^1.42.0",
+    "intervals-icu-api": "^0.1.2",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@enduragent/core": "workspace:*",
+    "@enduragent/sport-cycling": "workspace:*",
+    "@types/node": "^25.6.0",
+    "tsup": "^8.4.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
