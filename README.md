@@ -25,7 +25,7 @@ Automatically synchronizes daily health metrics, sleep data, and fitness vitals 
 
 1. **Python 3.10+**
 2. **Intervals.icu API Key**: Obtained from [Intervals.icu Settings](https://intervals.icu/settings).
-3. **Google Cloud OAuth Credentials**: A `credentials.json` file for your Google Cloud Project with the Google Health API enabled.
+3. **Google Cloud OAuth Credentials**: A `credentials.json` file for your Google Cloud Project with the Google Health API enabled. See [Google Health API setup](https://developers.google.com/health/setup) for instructions on how to obtain this file.
 
 ---
 
@@ -83,7 +83,7 @@ By default, the script syncs **past finalized days** (yesterday and the day befo
 
 ## 🖥️ Server Deployment Options
 
-### Option A: Systemd Service & Timer (Recommended for Production)
+### Option A: Systemd Service & Timer (Recommended)
 
 Systemd is the most robust way to run scheduled scripts on Ubuntu/Linux because it provides automatic retries on network failures and clean logging in `journalctl`.
 
