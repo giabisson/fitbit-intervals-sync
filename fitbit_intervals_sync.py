@@ -88,7 +88,6 @@ class FitbitIntervalsSync:
                 sleep_obj = dp.get("sleep", {})
                 summary = sleep_obj.get("summary", {})
                 
-                # Check for explicit sleep score if provided by device/API
                 score_val = sleep_obj.get("sleepScore") or summary.get("sleepScore") or \
                             sleep_obj.get("score") or summary.get("score")
                 if score_val is not None:
@@ -105,7 +104,6 @@ class FitbitIntervalsSync:
             if total_sleep_mins > 0:
                 wellness["sleepSecs"] = total_sleep_mins * 60
 
-            # Set sleepScore to explicit score if present, or fall back to sleep efficiency % (0-100)
             if explicit_sleep_score is not None:
                 wellness["sleepScore"] = round(explicit_sleep_score, 1)
             elif calculated_efficiency is not None:
@@ -161,14 +159,20 @@ class FitbitIntervalsSync:
 
         return wellness
 
-    def sync_days(self, days=3):
-        """Syncs data for the last `days` days up to today."""
+    def sync_days(self, days=2, include_today=False):
+        """
+        Syncs health metrics for past finalized days (defaulting to yesterday and prior).
+        If include_today is True, also syncs partial intraday data for today.
+        """
         today = datetime.now().date()
-        print(f"\nStarting sync for the past {days} day(s)...")
+        start_offset = 0 if include_today else 1
+        end_offset = start_offset + days
+
+        print(f"\nStarting sync for {days} finalized day(s) (include_today={include_today})...")
 
         synced_count = 0
-        for i in range(days - 1, -1, -1):
-            date_obj = today - timedelta(days=i)
+        for offset in range(end_offset - 1, start_offset - 1, -1):
+            date_obj = today - timedelta(days=offset)
             date_str = date_obj.strftime("%Y-%m-%d")
             print(f"\n--- Syncing date: {date_str} ---")
 
@@ -186,7 +190,8 @@ class FitbitIntervalsSync:
 
 def main():
     parser = argparse.ArgumentParser(description="Sync Fitbit data from Google Health API to Intervals.icu")
-    parser.add_argument("--days", type=int, default=3, help="Number of days to sync (default: 3)")
+    parser.add_argument("--days", type=int, default=2, help="Number of past finalized days to sync (default: 2)")
+    parser.add_argument("--include-today", action="store_true", help="Include partial intraday data for today")
     args = parser.parse_args()
 
     if not os.path.exists("token.json"):
@@ -195,7 +200,7 @@ def main():
         return
 
     sync = FitbitIntervalsSync()
-    sync.sync_days(days=args.days)
+    sync.sync_days(days=args.days, include_today=args.include_today)
 
 if __name__ == "__main__":
     main()
