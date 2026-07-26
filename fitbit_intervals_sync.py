@@ -54,23 +54,35 @@ class FitbitIntervalsSync:
                     if rmssd is not None:
                         wellness["hrv"] = round(float(rmssd), 2)
 
-        # 3. Weight (kg)
+        # 3. Weight (kg) - Google Health API returns weightGrams (in grams)
         weight_data = self.gh_client.list_data_points("weight")
         if weight_data and "dataPoints" in weight_data:
             for dp in weight_data["dataPoints"]:
                 w_obj = dp.get("weight", {})
-                kg = w_obj.get("weightKg") or w_obj.get("weight")
-                if kg is not None:
-                    wellness["weight"] = round(float(kg), 2)
+                sample_time = w_obj.get("sampleTime", {})
+                civil_date = sample_time.get("civilTime", {}).get("date")
+                d_str = format_date_dict(civil_date)
+                if d_str == target_date_str or not d_str:
+                    grams = w_obj.get("weightGrams")
+                    if grams is not None:
+                        wellness["weight"] = round(float(grams) / 1000.0, 2)
+                    else:
+                        kg = w_obj.get("weightKg") or w_obj.get("weight")
+                        if kg is not None:
+                            wellness["weight"] = round(float(kg), 2)
 
         # 4. Body Fat (%)
         bodyfat_data = self.gh_client.list_data_points("body-fat")
         if bodyfat_data and "dataPoints" in bodyfat_data:
             for dp in bodyfat_data["dataPoints"]:
                 bf_obj = dp.get("bodyFat", {})
-                pct = bf_obj.get("percentage")
-                if pct is not None:
-                    wellness["bodyFat"] = round(float(pct), 2)
+                sample_time = bf_obj.get("sampleTime", {})
+                civil_date = sample_time.get("civilTime", {}).get("date")
+                d_str = format_date_dict(civil_date)
+                if d_str == target_date_str or not d_str:
+                    pct = bf_obj.get("percentage")
+                    if pct is not None:
+                        wellness["bodyFat"] = round(float(pct), 2)
 
         # 5. Sleep (duration, sleep score, sleep quality)
         sleep_data = self.gh_client.reconcile_data_points(
