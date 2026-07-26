@@ -26,6 +26,7 @@ class FitbitIntervalsSync:
         and builds an Intervals.icu Wellness dictionary.
         """
         wellness = {}
+        year, month, day = map(int, target_date_str.split("-"))
 
         # 1. Daily Resting Heart Rate
         rhr_data = self.gh_client.list_data_points("daily-resting-heart-rate")
@@ -142,20 +143,15 @@ class FitbitIntervalsSync:
                 if vo2_val is not None:
                     wellness["vo2max"] = round(float(vo2_val), 2)
 
-        # 9. Steps
-        steps_data = self.gh_client.list_data_points(
-            "steps",
-            query_params={"filter": f'steps.interval.civil_start_time >= "{target_date_str}T00:00:00"'}
-        )
-        if steps_data and "dataPoints" in steps_data:
-            total_steps = 0
-            for dp in steps_data["dataPoints"]:
-                step_obj = dp.get("steps", {})
-                count = step_obj.get("count")
-                if count is not None:
-                    total_steps += int(count)
-            if total_steps > 0:
-                wellness["steps"] = total_steps
+        # 9. Steps (using official dailyRollUp API endpoint for accurate total count)
+        try:
+            rollup = self.gh_client.daily_rollup("steps", year, month, day)
+            if rollup and "rollupDataPoints" in rollup and len(rollup["rollupDataPoints"]) > 0:
+                count_sum = rollup["rollupDataPoints"][0].get("steps", {}).get("countSum")
+                if count_sum is not None:
+                    wellness["steps"] = int(count_sum)
+        except Exception as e:
+            print(f"Error fetching dailyRollUp for steps on {target_date_str}: {e}")
 
         return wellness
 

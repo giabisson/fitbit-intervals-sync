@@ -3,7 +3,6 @@ import json
 import requests
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
 
 SCOPES = [
     "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
@@ -16,13 +15,13 @@ TOKEN_FILE = "token.json"
 BASE_URL = "https://health.googleapis.com/v4"
 
 class GoogleHealthClient:
-    def __init__(self, client_secrets_file=CLIENT_SECRETS_FILE, token_file=TOKEN_FILE, prompt_auth=True):
+    def __init__(self, client_secrets_file=CLIENT_SECRETS_FILE, token_file=TOKEN_FILE, prompt_auth=False):
         self.client_secrets_file = client_secrets_file
         self.token_file = token_file
         self.creds = None
         self._authenticate(prompt_auth=prompt_auth)
 
-    def _authenticate(self, prompt_auth=True):
+    def _authenticate(self, prompt_auth=False):
         """Gets or creates OAuth 2.0 credentials."""
         if os.path.exists(self.token_file):
             try:
@@ -35,7 +34,6 @@ class GoogleHealthClient:
         if self.creds and self.creds.expired and self.creds.refresh_token:
             try:
                 self.creds.refresh(Request())
-                print("Refreshed expired Google OAuth token successfully.")
                 self._save_token()
                 return
             except Exception as e:
@@ -44,39 +42,7 @@ class GoogleHealthClient:
 
         if not self.creds or not self.creds.valid:
             if not prompt_auth:
-                raise PermissionError("Google OAuth credentials invalid or missing. Run authentication setup.")
-            
-            print("\n=== Google OAuth Setup ===")
-            with open(self.client_secrets_file) as f:
-                cs = json.load(f)
-            client_type = list(cs.keys())[0]
-            redirect_uris = cs[client_type].get("redirect_uris", ["https://www.google.com"])
-            redirect_uri = redirect_uris[0]
-
-            flow = InstalledAppFlow.from_client_secrets_file(
-                self.client_secrets_file, SCOPES, redirect_uri=redirect_uri
-            )
-            auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
-
-            print("\n1. Open the following URL in your web browser:")
-            print(f"\n{auth_url}\n")
-            print("2. Authorize the application with your Google/Fitbit account.")
-            print(f"3. After authorizing, you will be redirected to: {redirect_uri}?code=YOUR_CODE_HERE")
-            print("4. Copy the full redirected URL (or just the value of the 'code' parameter).\n")
-
-            auth_response = input("Enter the authorization code or redirected URL: ").strip()
-            if "code=" in auth_response:
-                # Extract code parameter if user pasted full URL
-                from urllib.parse import parse_qs, urlparse
-                parsed = urlparse(auth_response)
-                code = parse_qs(parsed.query).get("code", [auth_response])[0]
-            else:
-                code = auth_response
-
-            flow.fetch_token(code=code)
-            self.creds = flow.credentials
-            self._save_token()
-            print(f"Authentication successful! Saved offline token to {self.token_file}.\n")
+                raise PermissionError("Google OAuth credentials invalid or missing. Please run auth_setup.py.")
 
     def _save_token(self):
         """Saves authorized user credentials to token file."""
@@ -118,6 +84,28 @@ class GoogleHealthClient:
         if res.ok:
             return res.json()
         print(f"Error reconciling data points for {data_type}: {res.status_code} - {res.text}")
+        return None
+
+    def daily_rollup(self, data_type, year, month, day):
+        """Aggregates data points for a single day via dailyRollUp endpoint."""
+        url = f"{BASE_URL}/users/me/dataTypes/{data_type}/dataPoints:dailyRollUp"
+        body = {
+            "range": {
+                "start": {
+                    "date": {"year": year, "month": month, "day": day},
+                    "time": {"hours": 0, "minutes": 0, "seconds": 0}
+                },
+                "end": {
+                    "date": {"year": year, "month": month, "day": day},
+                    "time": {"hours": 23, "minutes": 59, "seconds": 59}
+                }
+            },
+            "windowSizeDays": 1
+        }
+        res = requests.post(url, headers=self._get_headers(), json=body)
+        if res.ok:
+            return res.json()
+        print(f"Error fetching dailyRollUp for {data_type}: {res.status_code} - {res.text}")
         return None
 
 if __name__ == "__main__":
